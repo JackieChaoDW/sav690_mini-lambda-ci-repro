@@ -1,6 +1,6 @@
 {
   "name": "demo-service",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "description": "Stand-in for a normal marketplace app — used to verify that PRs touching only this (not aws/lambdas/**) are NOT blocked by the path-filtered lambda-pr-check required check, thanks to the no-op pairing.",
   "scripts": {
