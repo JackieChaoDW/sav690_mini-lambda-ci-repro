@@ -1,0 +1,84 @@
+# Minimal reproduction of marketplace.monorepo's lambda-pr-check.yaml, adapted for
+# SAV-690's design verification — same job structure and same coverage-guard logic
+# (copied near-verbatim from the ticket's own comment snippet), just pointed at this
+# mini repo's smaller path tree so it can be tested end-to-end without needing
+# CodeArtifact auth or any org-internal secrets.
+name: Lambda PR Check
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/demo-service/aws/lambdas/**'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      lambdas: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            enrolled-hello:
+              - 'apps/demo-service/aws/lambdas/enrolled-hello/**'
+
+  check:
+    needs: detect
+    if: needs.detect.outputs.lambdas != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lambda: ${{ fromJSON(needs.detect.outputs.lambdas) }}
+    env:
+      LAMBDA_DIR: apps/demo-service/aws/lambdas/${{ matrix.lambda }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ${{ env.LAMBDA_DIR }}/package-lock.json
+      - name: Install deps and run tests
+        working-directory: ${{ env.LAMBDA_DIR }}
+        run: |
+          npm ci --ignore-scripts
+          npm test
+
+  # SAV-690's core new mechanism. Logic copied near-verbatim from Knas Xiao's comment
+  # on the ticket — only the COVERED list and the path glob were adapted to this
+  # mini repo. Deliberately NOT gated by `detect`/`needs` — it must always run,
+  # unconditionally, so it can't be silently skipped the way `check` can.
+  coverage-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Fail on lambda dirs not enrolled in this check
+        env:
+          # keep in sync with the detect filters + check matrix above
+          COVERED: enrolled-hello
+        run: |
+          git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
+          changed=$(git diff --name-only "origin/${GITHUB_BASE_REF}...HEAD" -- 'apps/demo-service/aws/lambdas/' \
+            | sed -E 's#^apps/demo-service/aws/lambdas/([^/]+)/.*#\1#' | sort -u)
+          missing=""
+          for l in $changed; do
+            case " $COVERED " in *" $l "*) ;; *) missing="$missing $l" ;; esac
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Lambda dir(s) not enrolled in lambda-pr-check:$missing — add to the paths-filter AND the matrix case block."
+            exit 1
+          fi

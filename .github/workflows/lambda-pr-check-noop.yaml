@@ -1,0 +1,17 @@
+# No-op pairing half of SAV-690's design. `name:` and the `coverage-guard` job id
+# must match lambda-pr-check.yaml exactly — GitHub matches required-status-check
+# contexts by (workflow name, job name), not by filename, so whichever of the two
+# workflows actually triggers reports the same check context.
+name: Lambda PR Check
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - 'apps/demo-service/aws/lambdas/**'
+
+jobs:
+  coverage-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "No lambda changes in this PR — no-op pass."
