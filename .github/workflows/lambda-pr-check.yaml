@@ -1,15 +1,29 @@
 # Minimal reproduction of marketplace.monorepo's lambda-pr-check.yaml, adapted for
-# SAV-690's design verification — same job structure and same coverage-guard logic
-# (copied near-verbatim from the ticket's own comment snippet), just pointed at this
-# mini repo's smaller path tree so it can be tested end-to-end without needing
-# CodeArtifact auth or any org-internal secrets.
+# SAV-690's design verification — same job structure and same coverage-guard logic,
+# just pointed at this mini repo's smaller path tree so it can be tested end-to-end
+# without needing CodeArtifact auth or any org-internal secrets.
+#
+# Synced to match the FINAL design shipped in PR #634 (reddrummer/marketplace.monorepo)
+# after CodeRabbit review: no paths: restriction (detect + coverage-guard run
+# unconditionally on every PR), no separate no-op pairing workflow (removed — see
+# git history of this file), COVERED is service-qualified.
 name: Lambda PR Check
 
 on:
   pull_request:
     branches: [main]
-    paths:
-      - 'apps/demo-service/aws/lambdas/**'
+    # SAV-690 (final design, post-CodeRabbit-review): deliberately NO paths:
+    # restriction — detect (cheap) and coverage-guard both run unconditionally on
+    # every PR. The earlier design restricted this workflow's trigger to
+    # apps/demo-service/aws/lambdas/** and paired it with a separate
+    # lambda-pr-check-noop.yaml (paths-ignore mirroring this list) so non-matching
+    # PRs weren't stuck pending — CodeRabbit found that pairing could produce two
+    # check-runs both named "Lambda PR Check / coverage-guard" on the same commit
+    # for a PR touching both an in-scope path and something outside both files'
+    # lists, which is a real correctness gap (GitHub's required-status-check
+    # evaluation for duplicate-named check-runs is understood to key off the
+    # latest run per context, not a logical AND). Removing the restriction
+    # entirely eliminates the ambiguity outright.
 
 permissions:
   contents: read
@@ -56,30 +70,49 @@ jobs:
           npm ci --ignore-scripts
           npm test
 
-  # SAV-690's core new mechanism. Logic copied near-verbatim from Knas Xiao's comment
-  # on the ticket — only the COVERED list and the path glob were adapted to this
-  # mini repo. Deliberately NOT gated by `detect`/`needs` — it must always run,
-  # unconditionally, so it can't be silently skipped the way `check` can.
+  # SAV-690's core new mechanism. Deliberately NOT gated by `detect`/`needs` — it
+  # must always run, unconditionally, so it can't be silently skipped the way
+  # `check` can. It is the job that must be marked required on main.
+  #
+  # COVERED is a hardcoded whitelist, kept in sync by hand with the `detect`
+  # filters and `check` matrix above. Entries are service-qualified
+  # ("<service>/<lambda>"), not bare lambda names — a bare name would let a
+  # same-named lambda under a different (hypothetical) service falsely match this
+  # whitelist even though no `detect` filter covers that specific combination,
+  # the same silent-green failure mode this job exists to catch, via a naming
+  # collision instead of a missing enrollment (CodeRabbit finding on the real
+  # repo's PR #634).
   coverage-guard:
     runs-on: ubuntu-latest
     steps:
+      # persist-credentials: true — unlike detect/check above, this job runs its
+      # own `git fetch` against origin beyond what checkout itself does. On a
+      # PRIVATE repo, persist-credentials: false leaves that fetch with no auth
+      # at all and it fails outright ("fatal: could not read Username for
+      # 'https://github.com'"). This mini repo is public, so that specific
+      # failure never reproduces here — persist-credentials: true is set anyway
+      # to mirror the real repo's fix exactly (found via that PR's own live CI,
+      # not this repo, since anonymous fetch works fine on a public repo).
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
+          persist-credentials: true
       - name: Fail on lambda dirs not enrolled in this check
         env:
           # keep in sync with the detect filters + check matrix above
-          COVERED: enrolled-hello
+          COVERED: demo-service/enrolled-hello
         run: |
           git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
-          # NOTE (found via SAV-690 mini-repro testing): three-dot diff (A...B) needs a
-          # merge-base, which two independent --depth=1 shallow fetches usually don't
-          # share — it fails with "fatal: ...: no merge base", that failure is silently
-          # swallowed inside $(...), and $changed silently becomes empty, making this
-          # guard vacuously pass on every PR regardless of content. Two-dot diff (A..B)
-          # just compares tree contents directly and needs no shared history.
-          changed=$(git diff --name-only "origin/${GITHUB_BASE_REF}..HEAD" -- 'apps/demo-service/aws/lambdas/' \
-            | sed -E 's#^apps/demo-service/aws/lambdas/([^/]+)/.*#\1#' | sort -u)
+          # Two-dot diff (A..B), not three-dot (A...B): three-dot needs a merge-base,
+          # which two independent --depth=1 shallow fetches usually don't share — it
+          # fails with "fatal: ...: no merge base", silently swallowed inside $(...),
+          # making $changed silently empty and this guard vacuously pass regardless
+          # of PR content. Two-dot diff compares tree contents directly, no shared
+          # history needed.
+          #
+          # Captures "<service>/<lambda>" (not just the bare lambda name) — see the
+          # service-qualification note above the COVERED env var.
+          changed=$(git diff --name-only "origin/${GITHUB_BASE_REF}..HEAD" -- 'apps/*/aws/lambdas/' \
+            | sed -E 's#^apps/([^/]+)/aws/lambdas/([^/]+)/.*#\1/\2#' | sort -u)
           missing=""
           for l in $changed; do
             case " $COVERED " in *" $l "*) ;; *) missing="$missing $l" ;; esac
