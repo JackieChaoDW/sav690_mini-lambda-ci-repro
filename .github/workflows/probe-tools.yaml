@@ -27,5 +27,7 @@ jobs:
       - name: Try actual extraction with yq (if present)
         run: |
           command -v yq || { echo "skipping — yq not present"; exit 0; }
-          echo "--- extracting detect's filter keys via yq ---"
-          yq '.jobs.detect.steps[] | select(.id == "filter") | .with.filters' .github/workflows/lambda-pr-check.yaml
+          echo "--- extracting detect's filter keys via yq (double-parse) ---"
+          yq '.jobs.detect.steps[] | select(.id == "filter") | .with.filters' .github/workflows/lambda-pr-check.yaml \
+            | yq 'keys | .[]' -
+          echo "--- exit code: $? ---"
