@@ -72,7 +72,13 @@ jobs:
           COVERED: enrolled-hello
         run: |
           git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
-          changed=$(git diff --name-only "origin/${GITHUB_BASE_REF}...HEAD" -- 'apps/demo-service/aws/lambdas/' \
+          # NOTE (found via SAV-690 mini-repro testing): three-dot diff (A...B) needs a
+          # merge-base, which two independent --depth=1 shallow fetches usually don't
+          # share — it fails with "fatal: ...: no merge base", that failure is silently
+          # swallowed inside $(...), and $changed silently becomes empty, making this
+          # guard vacuously pass on every PR regardless of content. Two-dot diff (A..B)
+          # just compares tree contents directly and needs no shared history.
+          changed=$(git diff --name-only "origin/${GITHUB_BASE_REF}..HEAD" -- 'apps/demo-service/aws/lambdas/' \
             | sed -E 's#^apps/demo-service/aws/lambdas/([^/]+)/.*#\1#' | sort -u)
           missing=""
           for l in $changed; do
