@@ -111,7 +111,18 @@ jobs:
           #
           # Captures "<service>/<lambda>" (not just the bare lambda name) — see the
           # service-qualification note above the COVERED env var.
-          changed=$(git diff --name-only "origin/${GITHUB_BASE_REF}..HEAD" -- 'apps/*/aws/lambdas/' \
+          #
+          # Pathspec MUST end in /** , not just a trailing slash: a pathspec with
+          # NO wildcard gets git's special "trailing slash = this whole directory"
+          # literal-prefix treatment, but once it contains a `*` (as this one does,
+          # for the service segment), git switches to fnmatch/glob semantics for
+          # the ENTIRE pathspec — `*` never crosses `/` and there is no `**` to
+          # mean "everything under this directory", so 'apps/*/aws/lambdas/' (no
+          # trailing **) matches literally nothing. Found via a real repro on
+          # this exact pathspec: 0 files matched without **, all expected files
+          # matched with it. This is the same class of bug as the real repo's
+          # PR #634 — found there via this same mini-repro sync/re-test cycle.
+          changed=$(git diff --name-only "origin/${GITHUB_BASE_REF}..HEAD" -- 'apps/*/aws/lambdas/**' \
             | sed -E 's#^apps/([^/]+)/aws/lambdas/([^/]+)/.*#\1/\2#' | sort -u)
           missing=""
           for l in $changed; do
