@@ -30,6 +30,8 @@ jobs:
           filters: |
             enrolled-hello:
               - 'apps/demo-service/aws/lambdas/enrolled-hello/**'
+            not-enrolled-hello:
+              - 'apps/demo-service/aws/lambdas/not-enrolled-hello/**'
 
   check:
     needs: detect
@@ -69,7 +71,7 @@ jobs:
       - name: Fail on lambda dirs not enrolled in this check
         env:
           # keep in sync with the detect filters + check matrix above
-          COVERED: enrolled-hello
+          COVERED: enrolled-hello not-enrolled-hello
         run: |
           git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
           # NOTE (found via SAV-690 mini-repro testing): three-dot diff (A...B) needs a
