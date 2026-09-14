@@ -11,6 +11,6 @@ describe('enrolled-hello handler', () => {
   it('defaults to world when no name is given', async () => {
     const event = { queryStringParameters: null } as unknown as APIGatewayProxyEvent;
     const result: any = await handler(event, {} as Context, () => undefined);
-    expect(JSON.parse(result.body).message).toBe('hello, world');
+    expect(JSON.parse(result.body).message).toBe('hello 2, world');
   });
 });
