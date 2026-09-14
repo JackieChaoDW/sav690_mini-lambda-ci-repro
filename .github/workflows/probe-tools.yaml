@@ -1,0 +1,28 @@
+# Throwaway probe: check what's preinstalled on the GitHub-hosted ubuntu-latest
+# runner, to decide whether coverage-guard could safely use a real YAML parser
+# (yq / PyYAML) instead of hand-rolled text parsing. Delete after use.
+name: Probe Tool Availability
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check yq
+        run: |
+          echo "=== yq ==="
+          command -v yq && yq --version || echo "yq: NOT FOUND"
+      - name: Check python3 + PyYAML
+        run: |
+          echo "=== python3 ==="
+          command -v python3 && python3 --version || echo "python3: NOT FOUND"
+          echo "=== PyYAML ==="
+          python3 -c "import yaml; print('PyYAML version:', yaml.__version__)" || echo "PyYAML: NOT AVAILABLE"
+      - name: Try actual extraction with yq (if present)
+        run: |
+          command -v yq || { echo "skipping — yq not present"; exit 0; }
+          echo "--- extracting detect's filter keys via yq ---"
+          yq '.jobs.detect.steps[] | select(.id == "filter") | .with.filters' .github/workflows/lambda-pr-check.yaml
