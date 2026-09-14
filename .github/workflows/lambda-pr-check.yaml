@@ -74,14 +74,23 @@ jobs:
   # must always run, unconditionally, so it can't be silently skipped the way
   # `check` can. It is the job that must be marked required on main.
   #
-  # COVERED is a hardcoded whitelist, kept in sync by hand with the `detect`
-  # filters and `check` matrix above. Entries are service-qualified
-  # ("<service>/<lambda>"), not bare lambda names — a bare name would let a
-  # same-named lambda under a different (hypothetical) service falsely match this
-  # whitelist even though no `detect` filter covers that specific combination,
-  # the same silent-green failure mode this job exists to catch, via a naming
-  # collision instead of a missing enrollment (CodeRabbit finding on the real
-  # repo's PR #634).
+  # COVERED is DERIVED at runtime from detect's own filter definitions above —
+  # not a second hand-maintained list. Earlier versions of this job hardcoded
+  # COVERED as a separate string, explicitly rejecting dynamic derivation
+  # because parsing detect's filters block by hand (awk/grep on raw text) is a
+  # fragile, indentation-sensitive mini YAML parser that risks silently
+  # producing a wrong or empty result — the exact failure class this job exists
+  # to prevent. That objection no longer applies: `yq` (a real, well-tested
+  # YAML parser) is confirmed preinstalled on the GitHub-hosted runner image —
+  # verified identical between this repo and the real repo's own runners
+  # (same Hosted Compute Agent version, same image release tag) via a
+  # dedicated throwaway probe workflow. With a hand-maintained COVERED, a PR
+  # could add an entry to COVERED without adding the matching detect filter —
+  # coverage-guard would pass (COVERED says it's fine) while detect/check never
+  # actually test that lambda (CodeRabbit finding on the real repo's PR #634).
+  # Deriving COVERED from detect's filters removes the second list entirely —
+  # there is nothing left to independently drift out of sync, by construction,
+  # not by adding a cross-check on top of two still-separately-maintained lists.
   coverage-guard:
     runs-on: ubuntu-latest
     steps:
@@ -97,20 +106,30 @@ jobs:
         with:
           persist-credentials: true
       - name: Fail on lambda dirs not enrolled in this check
-        env:
-          # keep in sync with the detect filters + check matrix above
-          COVERED: demo-service/enrolled-hello
         run: |
           git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
+
+          # Derive COVERED from detect's own filters block (single source of
+          # truth): extract the filters value (itself a YAML string) via yq,
+          # parse THAT as YAML too (double-parse — GitHub Actions stores a
+          # step's multi-line `with.filters` as a plain string, not nested
+          # YAML), flatten every path-glob value across every named filter,
+          # keep only the ones shaped like a lambda path, and reduce each to
+          # "<service>/<lambda>" — the same transform used on $changed below,
+          # so both sides of the comparison are derived the same way.
+          COVERED=$(yq '.jobs.detect.steps[] | select(.id == "filter") | .with.filters' .github/workflows/lambda-pr-check.yaml \
+            | yq '.[] | .[]' - \
+            | grep -E '^apps/[^/]+/aws/lambdas/[^/]+/' \
+            | sed -E 's#^apps/([^/]+)/aws/lambdas/([^/]+)/.*#\1/\2#' \
+            | sort -u | tr '\n' ' ')
+          echo "Derived COVERED: $COVERED"
+
           # Two-dot diff (A..B), not three-dot (A...B): three-dot needs a merge-base,
           # which two independent --depth=1 shallow fetches usually don't share — it
           # fails with "fatal: ...: no merge base", silently swallowed inside $(...),
           # making $changed silently empty and this guard vacuously pass regardless
           # of PR content. Two-dot diff compares tree contents directly, no shared
           # history needed.
-          #
-          # Captures "<service>/<lambda>" (not just the bare lambda name) — see the
-          # service-qualification note above the COVERED env var.
           #
           # Pathspec MUST end in /** , not just a trailing slash: a pathspec with
           # NO wildcard gets git's special "trailing slash = this whole directory"
